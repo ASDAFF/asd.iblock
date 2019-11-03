@@ -1,0 +1,13 @@
+{
+  "name": "asd.iblock",
+  "version": "4.6.6",
+  "main": "",
+  "ignore": [
+    "source",
+    ".gitignore",
+    ".idea",
+    "bower.json",
+    "gulpfile.js",
+    "package.json"
+  ]
+}
