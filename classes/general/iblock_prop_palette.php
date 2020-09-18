@@ -26,11 +26,11 @@ class CASDiblockPropPalette {
       				$("#'.$strID.'").jPicker({
       					window: {
 title: "'.GetMessage('ASD_UT_PALETTE_WND_TITLE').'",
-position: {x: \'screenCenter\', y: '.(
+position: {x: \'screenCenter\', y: \'center\' /*'.(
 					defined('BX_PUBLIC_MODE') && BX_PUBLIC_MODE == 1 ?
 					'screen.height / 2 -150' :
-					'\'bottom\''
-				).'}
+					'\'center\''
+				).'*/}
 },
       					images: {clientPath : "/bitrix/js/asd.iblock/jpicker/images/"},
       					localization: {

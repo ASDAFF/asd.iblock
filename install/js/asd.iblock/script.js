@@ -127,6 +127,39 @@ $(document).ready(function(){
 			}
 		});
 	});
+	$('.list input').live('click', function(e){
+		if ($(this).attr('name') == 'ID[]') {
+			if (sStartCh.length>0 && e.shiftKey && sStartCh!=$(this).val()) {
+				sEndCh = $(this).val();
+			} else {
+				sStartCh = $(this).val();
+			}
+
+			var bWasChecked = false;
+			var bDoCheck = false;
+
+			if (e.shiftKey && sStartCh.length>0 && sEndCh.length>0) {
+				$('.list input').each(function(){
+					if ($(this).attr('name') == 'ID[]') {
+						if ($(this).val()==sStartCh || $(this).val()==sEndCh) {
+							bDoCheck = !bDoCheck;
+							bWasChecked = true;
+						}
+						if (bDoCheck) {
+							this.checked = true;
+							obListTable = new JCAdminList(sListTable);
+							obListTable.SelectRow(this);
+							$(this).attr('checked', true);
+						}
+					}
+				});
+			}
+
+			if (bWasChecked)
+				sStartCh = sEndCh = '';
+
+		}
+	});
 });
 
 function ASDSelIBChange(value) {
@@ -138,5 +171,32 @@ function ASDSelIBShow(lang) {
 	if (-1 < BX('asd_ib_dest').selectedIndex) {
 		var intIBlockID = BX('asd_ib_dest').options[BX('asd_ib_dest').selectedIndex].value;
 		jsUtils.OpenWindow('/bitrix/admin/iblock_section_search.php?lang='+lang+'&IBLOCK_ID='+intIBlockID+'&n=asd_sect_id', 600, 500);
+	}
+}
+
+function ASDSetCurrentIblock(id, value) {
+	var control;
+	id += '_control';
+	control = BX(id);
+	if (BX.type.isElementNode(control)) {
+		control.value = value;
+	}
+}
+
+function ASDShowSectionWindow(source, dest, lang, multi) {
+	var control,
+		iblock;
+
+	source += '_control';
+	dest += '_control';
+	control = BX(source);
+	if (BX.type.isElementNode(control)) {
+		iblock = parseInt(control.value, 10);
+		if (isNaN(iblock)) {
+			iblock = 0;
+		}
+		if (iblock > 0) {
+			jsUtils.OpenWindow('/bitrix/admin/asd_iblock_section_search.php?lang='+lang+'&IBLOCK_ID='+iblock+'&iblockfix=y&n='+dest+(multi ? '&m=y' : ''), 600, 500);
+		}
 	}
 }

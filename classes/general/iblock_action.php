@@ -1,23 +1,45 @@
 <?php
+use Bitrix\Main\Loader,
+	Bitrix\Main\Localization\Loc;
 
-IncludeModuleLangFile(__FILE__);
+Loc::loadMessages(__FILE__);
 
 class CASDiblockAction {
+
+	private static $gridAction = '';
+	private static $gridId = '';
+	private static $action = '';
+
+	private static $iblockIncluded = null;
+	private static $catalogIncluded = null;
 
 	public static function OnBeforePrologHandler() {
 
 		global $USER_FIELD_MANAGER;
 
-		if (isset($_REQUEST['action_button']) && !isset($_REQUEST['action'])) {
-			$_REQUEST['action'] = $_REQUEST['action_button'];
-		}
-		if (!isset($_REQUEST['action'])) {
+		self::initAction();
+		$action = self::getAction();
+		$gridAction = self::getGridAction();
+		if ($action == '' && $gridAction == '') {
 			return;
 		}
+		if (!check_bitrix_sessid()) {
+			return;
+		}
+		if (self::$iblockIncluded === null) {
+			self::$iblockIncluded = Loader::includeModule('iblock');
+		}
+		if (!self::$iblockIncluded) {
+			return;
+		}
+		if (self::$catalogIncluded === null) {
+			self::$catalogIncluded = Loader::includeModule('catalog');
+		}
+
 		$BID = (isset($_REQUEST['ID']) ? (int)$_REQUEST['ID'] : 0);
 
-		if ($_REQUEST['action']=='asd_prop_export' && $BID>0 && check_bitrix_sessid() &&
-			CModule::IncludeModule('iblock') && CASDIblockRights::IsIBlockEdit($BID)
+		if ($action=='asd_prop_export' && $BID>0 &&
+			CASDIblockRights::IsIBlockEdit($BID)
 		) {
 			$strPath = $_SERVER['DOCUMENT_ROOT'].'/bitrix/tmp/asd.iblock/';
 			$strName = 'asd_props_export_'.$BID.'_'.md5(LICENSE_KEY).'.xml';
@@ -39,9 +61,10 @@ class CASDiblockAction {
 			die();
 		}
 
-		if ($_REQUEST['action']=='asd_prop_import' && $BID>0 && !$_FILES['xml_file']['error'] &&
-			check_bitrix_sessid() && CModule::IncludeModule('iblock') && CASDIblockRights::IsIBlockEdit($BID)
+		if ($action=='asd_prop_import' && $BID>0 && !$_FILES['xml_file']['error'] &&
+			CASDIblockRights::IsIBlockEdit($BID)
 		) {
+			$arOldNewID = array();
 			CASDiblockTools::ImportPropsFromXML($BID, $_FILES['xml_file']['tmp_name'], $arOldNewID);
 			CASDiblockTools::ImportFormsFromXML($BID, $_FILES['xml_file']['tmp_name'], $arOldNewID);
 			LocalRedirect('/bitrix/admin/iblock_edit.php?type='.$_REQUEST['type'].'&tabControl_active_tab=edit2&lang='.LANGUAGE_ID.'&ID='.$BID.'&admin=Y');
@@ -55,8 +78,8 @@ class CASDiblockAction {
 			}
 		}
 
-		if ($_REQUEST['action']=='asd_reverse' && $IBLOCK_ID>0 && check_bitrix_sessid() &&
-			CModule::IncludeModule('iblock') && CASDIblockRights::IsIBlockEdit($IBLOCK_ID)
+		if ($action=='asd_reverse' && $IBLOCK_ID>0 &&
+			CASDIblockRights::IsIBlockEdit($IBLOCK_ID)
 		) {
 			$LIST_MODE = CIBlock::GetArrayByID($IBLOCK_ID, 'LIST_MODE');
 			if (!strlen($LIST_MODE)) {
@@ -65,7 +88,13 @@ class CASDiblockAction {
 			$LIST_MODE = $LIST_MODE=='C' ? 'S' : 'C';
 			$ib = new CIBlock();
 			$ib->Update($IBLOCK_ID, array('LIST_MODE' => $LIST_MODE));
-			LocalRedirect('/bitrix/admin/'.($LIST_MODE == 'S' ? 'iblock_element_admin' : 'iblock_list_admin').'.php?IBLOCK_ID='.$IBLOCK_ID.
+			$elementListPage = '';
+			if (!defined('CATALOG_PRODUCT')) {
+				$elementListPage = $LIST_MODE == 'S' ? 'iblock_element_admin' : 'iblock_list_admin';
+			} else {
+				$elementListPage = $LIST_MODE == 'S' ? 'cat_product_admin' : 'cat_product_list';
+			}
+			LocalRedirect('/bitrix/admin/'.$elementListPage.'.php?IBLOCK_ID='.$IBLOCK_ID.
 																'&type='.htmlspecialcharsbx($_REQUEST['type']).
 																'&find_section_section='.intval($_REQUEST['find_section_section']).
 																'&lang='.LANGUAGE_ID);
@@ -82,40 +111,93 @@ class CASDiblockAction {
 		$bRightPage = ($bElemPage || $bSectPage || $bMixPage);
 		$successRedirect = false;
 
-		if ($bRightPage && $_REQUEST['action']=='asd_copy_in_list' && strlen($_REQUEST['ID'])>0) {
+		if ($bRightPage && $gridAction=='asd_copy_in_list' && strlen($_REQUEST['ID'])>0) {
 			$bDoAction = true;
-			$_REQUEST['action'] = 'asd_copy';
+			//$gridAction = 'asd_copy';
 			$_REQUEST['asd_ib_dest'] = $IBLOCK_ID;
 			$_REQUEST['ID'] = array($_REQUEST['ID']);
 		} else {
 			$bDoAction = false;
 		}
 
-		if ($bRightPage && check_bitrix_sessid() && !empty($_REQUEST['ID']) &&
-			($_SERVER['REQUEST_METHOD']=='POST' || $bDoAction) && CModule::IncludeModule('iblock') &&
-			($_REQUEST['action']=='asd_copy' || $_REQUEST['action']=='asd_move') &&
+		if ($bRightPage && !empty($_REQUEST['ID']) &&
+			($_SERVER['REQUEST_METHOD']=='POST' || $bDoAction) &&
+			($gridAction=='asd_copy' || $gridAction=='asd_copy_in_list' || $gridAction=='asd_move') &&
 			isset($_REQUEST['asd_ib_dest']) && (int)$_REQUEST['asd_ib_dest'] > 0 &&
 			CASDIblockRights::IsIBlockDisplay($_REQUEST['asd_ib_dest'])
 		) {
 			$intSrcIBlockID = $IBLOCK_ID;
 			$intDestIBlockID = (int)$_REQUEST['asd_ib_dest'];
 
+			$enableMultiSelect = !$bSectPage && (string)\Bitrix\Main\Config\Option::get('asd.iblock', 'enable_section_multiselect') === 'Y';
+
+			$keepOldSections = (string)\Bitrix\Main\Config\Option::get('asd.iblock', 'keep_old_sections_for_copy') === 'Y';
+
+			$multipleCopy = (string)\Bitrix\Main\Config\Option::get('asd.iblock', 'multiple_copy') === 'Y';
+
 			$intSetSectID = 0;
-			if (isset($_REQUEST['asd_sect_dest'])) {
-				$intSetSectID = (int)$_REQUEST['asd_sect_dest'];
-				if ($intSetSectID < 0) {
-					$intSetSectID = 0;
+			$sections = array();
+			$emptySections = false;
+			if (isset($_REQUEST['asd_sect_dest']) && is_string($_REQUEST['asd_sect_dest'])) {
+				if ($enableMultiSelect) {
+					$rawSections = str_replace(' ', '', trim($_REQUEST['asd_sect_dest']));
+					if ($rawSections !== '') {
+						$rawSections = explode(',', $rawSections);
+						if (!empty($rawSections) && is_array($rawSections)) {
+							foreach ($rawSections as $value) {
+								$value = (int)$value;
+								if ($value > 0) {
+									$sections[] = $value;
+								}
+							}
+						}
+					}
+				} else {
+					$value = (int)$_REQUEST['asd_sect_dest'];
+					if ($value > 0) {
+						$sections = array($value);
+					}
 				}
+			}
+
+			$allowedSectionOperation = count($sections) < 2;
+			if ($allowedSectionOperation && !empty($sections)) {
+				$intSetSectID = reset($sections);
+			}
+			if (empty($sections)) {
+				$sections = array(0);
+				$emptySections = true;
 			}
 
 			$boolCreateElement = false;
 			$boolCreateSection = false;
 
 			if ($bElemPage || $bMixPage) {
-				$boolCreateElement = CASDIblockRights::IsSectionElementCreate($intDestIBlockID, $intSetSectID);
+				foreach (array_keys($sections) as $index) {
+					if (!CASDIblockRights::IsSectionElementCreate($intDestIBlockID, $sections[$index])) {
+						unset($sections[$index]);
+					}
+				}
+				$boolCreateElement = !empty($sections);
 			}
 			if ($bSectPage || $bMixPage) {
 				$boolCreateSection = CASDIblockRights::IsSectionSectionCreate($intDestIBlockID, $intSetSectID);
+			}
+			if (!empty($sections)) {
+				if (count($sections) == 1 && reset($sections) == 0)
+				$emptySections = true;
+			}
+
+			if ($emptySections) {
+				$elementSections = array(0 => array());
+			} else {
+				if ($multipleCopy) {
+					foreach ($sections as $sectionId) {
+						$elementSections[] = array($sectionId);
+					}
+				} else {
+					$elementSections = array(0 => $sections);
+				}
 			}
 
 			if ($boolCreateElement || $boolCreateSection) {
@@ -143,16 +225,17 @@ class CASDiblockAction {
 					$boolSectCodeUnique = ($intSrcIBlockID == $intDestIBlockID);
 				}
 
-				$boolCatalog = CModule::IncludeModule('catalog');
 				$boolCopyCatalog = false;
 				$boolNewCatalog = false;
-				if ($boolCatalog) {
+				if (self::$catalogIncluded) {
 					$boolCopyCatalog = (is_array(CCatalog::GetByID($intDestIBlockID)));
 					$boolNewCatalog = $boolCopyCatalog;
 					if ($boolCopyCatalog) {
 						$boolCopyCatalog = (is_array(CCatalog::GetByID($intSrcIBlockID)));
 					}
 				}
+
+				$sectionsErr = false;
 
 				$el = new CIBlockElement();
 				$sc = new CIBlockSection();
@@ -200,6 +283,7 @@ class CASDiblockAction {
 							else {
 								$arSrc['DETAIL_PICTURE'] = false;
 							}
+							$rawSource = $arSrc;
 							$arSrc = array(
 								'IBLOCK_ID' => $intDestIBlockID,
 								'ACTIVE' => $arSrc['ACTIVE'],
@@ -219,6 +303,10 @@ class CASDiblockAction {
 								'XML_ID' => $arSrc['~XML_ID'],
 								'PROPERTY_VALUES' => array(),
 							);
+							if ($gridAction == 'asd_move' && $intDestIBlockID != $intSrcIBlockID) {
+								$arSrc['CREATED_BY'] = $rawSource['CREATED_BY'];
+								$arSrc['SHOW_COUNTER'] = $rawSource['SHOW_COUNTER'];
+							}
 							if ($arDestIBFields['CODE']['IS_REQUIRED'] == 'Y') {
 								if (!strlen($arSrc['CODE'])) {
 									$arSrc['CODE'] = mt_rand(100000, 1000000);
@@ -237,16 +325,33 @@ class CASDiblockAction {
 									$arSrc['CODE'] .= mt_rand(100, 10000);
 								}
 							}
-							if ($intSetSectID > 0) {
-								$arSrc['IBLOCK_SECTION_ID'] = $intSetSectID;
-							} elseif ($intSrcIBlockID == $intDestIBlockID) {
+
+/*							if ($intSrcIBlockID == $intDestIBlockID) {
 								$arSectionList = array();
-								$rsSections = CIBlockElement::GetElementGroups($ID, true);
-								while ($arSection = $rsSections->Fetch()) {
-									$arSectionList[] = $arSection['ID'];
+								if (
+									$gridAction == 'asd_copy_in_list'
+									|| ($gridAction == 'asd_copy' && $keepOldSections)
+								) {
+									$rsSections = CIBlockElement::GetElementGroups($ID, true);
+									while ($arSection = $rsSections->Fetch()) {
+										if (CASDIblockRights::IsSectionElementCreate($intDestIBlockID, $arSection['ID'])) {
+											$arSectionList[] = $arSection['ID'];
+										}
+									}
+									unset($arSection, $rsSections);
 								}
-								$arSrc['IBLOCK_SECTION'] = $arSectionList;
-							}
+								if (!$emptySections) {
+									$arSectionList = array_merge($arSectionList, $sections);
+									$arSectionList = array_unique($arSectionList);
+								}
+								if (!empty($arSectionList)) {
+									$arSrc['IBLOCK_SECTION'] = $arSectionList;
+								}
+								unset($arSectionList);
+							} elseif (!$emptySections) {
+								$arSrc['IBLOCK_SECTION'] = $sections;
+							} */
+
 							if ($intSrcIBlockID != $intDestIBlockID) {
 								if (empty($arPropListCache)) {
 									$rsProps = CIBlockProperty::GetList(
@@ -421,88 +526,133 @@ class CASDiblockAction {
 							}
 							unset($seoTemplates);
 
-							$intNewID = $el->Add($arSrc, true, true, true);
-							if ($intNewID) {
-								if ($boolCatalog && $boolCopyCatalog) {
-									$priceRes = CPrice::GetListEx(
-										array(),
-										array('PRODUCT_ID' => $ID),
-										false,
-										false,
-										array('PRODUCT_ID', 'EXTRA_ID', 'CATALOG_GROUP_ID', 'PRICE', 'CURRENCY', 'QUANTITY_FROM', 'QUANTITY_TO')
-									);
-									while ($arPrice = $priceRes->Fetch()){
-										$arPrice['PRODUCT_ID'] = $intNewID;
-										CPrice::Add($arPrice);
-									}
-								}
-								if ($boolCatalog && $boolNewCatalog) {
-									$arProduct = array(
-										'ID' => $intNewID
-									);
-									if ($boolCopyCatalog) {
-										$productRes = CCatalogProduct::GetList(
-											array(),
-											array('ID' => $ID),
-											false,
-											false,
-											array(
-												'QUANTITY_TRACE_ORIG',
-												'CAN_BUY_ZERO_ORIG',
-												'NEGATIVE_AMOUNT_TRACE_ORIG',
-												'SUBSCRIBE_ORIG',
-												'WEIGHT',
-												'PRICE_TYPE',
-												'RECUR_SCHEME_TYPE',
-												'RECUR_SCHEME_LENGTH',
-												'TRIAL_PRICE_ID',
-												'WITHOUT_ORDER',
-												'SELECT_BEST_PRICE',
-												'VAT_ID',
-												'VAT_INCLUDED',
-												'WIDTH',
-												'LENGTH',
-												'HEIGHT',
-												'PURCHASING_PRICE',
-												'PURCHASING_CURRENCY',
-												'MEASURE'
-											)
-										);
-										if ($arCurProduct = $productRes->Fetch()){
-											$arProduct = $arCurProduct;
-											$arProduct['ID'] = $intNewID;
-											$arProduct['QUANTITY'] = 0;
-											$arProduct['QUANTITY_TRACE'] = $arProduct['QUANTITY_TRACE_ORIG'];
-											$arProduct['CAN_BUY_ZERO'] = $arProduct['CAN_BUY_ZERO_ORIG'];
-											$arProduct['NEGATIVE_AMOUNT_TRACE'] = $arProduct['NEGATIVE_AMOUNT_TRACE_ORIG'];
-											if (isset($arProduct['SUBSCRIBE_ORIG'])) {
-												$arProduct['SUBSCRIBE'] = $arProduct['SUBSCRIBE_ORIG'];
-											}
-											foreach ($arProduct as $productKey => $productValue) {
-												if ($productValue === null)
-													unset($arProduct[$productKey]);
-											}
+							$oldSections = array();
+							if ($intSrcIBlockID == $intDestIBlockID) {
+								if (
+									$gridAction == 'asd_copy_in_list'
+									|| ($gridAction == 'asd_copy' && $keepOldSections)
+								) {
+									$rsSections = CIBlockElement::GetElementGroups($ID, true);
+									while ($arSection = $rsSections->Fetch()) {
+										if (CASDIblockRights::IsSectionElementCreate($intDestIBlockID, $arSection['ID'])) {
+											$oldSections[] = $arSection['ID'];
 										}
 									}
-									CCatalogProduct::Add($arProduct, false);
-								}
-								if ($_REQUEST['action'] == 'asd_move') {
-									if (CASDIblockRights::IsElementDelete($intSrcIBlockID, $ID)) {
-										$el->Delete($ID);
-									}
-									else {
-										CASDiblock::$error .= '['.$ID.'] '.GetMessage('ASD_ACTION_ERR_DELETE_ELEMENT_RIGHTS')."\n";
-									}
+									unset($arSection, $rsSections);
 								}
 							}
-							else {
-								CASDiblock::$error .= '['.$ID.'] '.$el->LAST_ERROR."\n";
+
+							$elementError = false;
+							foreach ($elementSections as $newSections) {
+								if (array_key_exists('IBLOCK_SECTION', $arSrc)) {
+									unset($arSrc['IBLOCK_SECTION']);
+								}
+								$iblockSections = array_merge($oldSections, $newSections);
+								if (!empty($iblockSections)) {
+									$iblockSections = array_unique($iblockSections);
+									$arSrc['IBLOCK_SECTION'] = $iblockSections;
+								}
+								unset($iblockSections);
+
+								$intNewID = $el->Add($arSrc, true, true, true);
+								if ($intNewID) {
+									if (self::$catalogIncluded && $boolCopyCatalog) {
+										$priceRes = CPrice::GetListEx(
+											array(),
+											array('PRODUCT_ID' => $ID),
+											false,
+											false,
+											array('PRODUCT_ID', 'EXTRA_ID', 'CATALOG_GROUP_ID', 'PRICE', 'CURRENCY', 'QUANTITY_FROM', 'QUANTITY_TO')
+										);
+										while ($arPrice = $priceRes->Fetch()) {
+											$arPrice['PRODUCT_ID'] = $intNewID;
+											CPrice::Add($arPrice);
+										}
+									}
+									if (self::$catalogIncluded && $boolNewCatalog) {
+										$arProduct = array(
+											'ID' => $intNewID
+										);
+										if ($boolCopyCatalog) {
+											$productRes = CCatalogProduct::GetList(
+												array(),
+												array('ID' => $ID),
+												false,
+												false,
+												array(
+													'QUANTITY_TRACE_ORIG',
+													'CAN_BUY_ZERO_ORIG',
+													'NEGATIVE_AMOUNT_TRACE_ORIG',
+													'SUBSCRIBE_ORIG',
+													'WEIGHT',
+													'PRICE_TYPE',
+													'RECUR_SCHEME_TYPE',
+													'RECUR_SCHEME_LENGTH',
+													'TRIAL_PRICE_ID',
+													'WITHOUT_ORDER',
+													'SELECT_BEST_PRICE',
+													'VAT_ID',
+													'VAT_INCLUDED',
+													'WIDTH',
+													'LENGTH',
+													'HEIGHT',
+													'PURCHASING_PRICE',
+													'PURCHASING_CURRENCY',
+													'MEASURE'
+												)
+											);
+											if ($arCurProduct = $productRes->Fetch()) {
+												$arProduct = $arCurProduct;
+												$arProduct['ID'] = $intNewID;
+												$arProduct['QUANTITY'] = 0;
+												$arProduct['QUANTITY_TRACE'] = $arProduct['QUANTITY_TRACE_ORIG'];
+												$arProduct['CAN_BUY_ZERO'] = $arProduct['CAN_BUY_ZERO_ORIG'];
+												$arProduct['NEGATIVE_AMOUNT_TRACE'] = $arProduct['NEGATIVE_AMOUNT_TRACE_ORIG'];
+												if (isset($arProduct['SUBSCRIBE_ORIG'])) {
+													$arProduct['SUBSCRIBE'] = $arProduct['SUBSCRIBE_ORIG'];
+												}
+												foreach ($arProduct as $productKey => $productValue)  {
+													if ($productValue === null)
+														unset($arProduct[$productKey]);
+												}
+											}
+										}
+										CCatalogProduct::Add($arProduct, false);
+									}
+/*									if ($gridAction == 'asd_move') {
+										if (CASDIblockRights::IsElementDelete($intSrcIBlockID, $ID))
+										{
+											$el->Delete($ID);
+										}
+										else
+										{
+											CASDiblock::$error .= '['.$ID.'] '.Loc::getMessage('ASD_ACTION_ERR_DELETE_ELEMENT_RIGHTS')."\n";
+										}
+									} */
+								}
+								else
+								{
+									CASDiblock::$error .= '['.$ID.'] '.$el->LAST_ERROR."\n";
+									$elementError = true;
+								}
+							}
+							if (!$elementError) {
+								if ($gridAction == 'asd_move') {
+									if (CASDIblockRights::IsElementDelete($intSrcIBlockID, $ID))
+									{
+										$el->Delete($ID);
+									}
+									else
+									{
+										CASDiblock::$error .= '['.$ID.'] '.Loc::getMessage('ASD_ACTION_ERR_DELETE_ELEMENT_RIGHTS')."\n";
+									}
+								}
 							}
 						}
 					}
 
 					if ($boolCreateSection && $boolCopySect) {
-						if ($_REQUEST['action'] == 'asd_move') {
+						if ($gridAction == 'asd_move') {
 							continue;
 						}
 						$rsSections = CIBlockSection::GetList(
@@ -517,6 +667,11 @@ class CASDiblockAction {
 						);
 						if ($arSrcSect = $rsSections->Fetch())
 						{
+							if (!$allowedSectionOperation) {
+								$sectionsErr = true;
+								continue;
+							}
+
 							$arDestSect = $arSrcSect;
 							unset($arDestSect['ID']);
 							$arDestSect['IBLOCK_ID'] = $intDestIBlockID;
@@ -704,21 +859,24 @@ class CASDiblockAction {
 						}
 					}
 				}
-				$successRedirect = true;
+				if ($sectionsErr) {
+					CASDiblock::$error .= Loc::getMessage('ASD_ACTION_ERR_MULTI_SECTION_TO_SECTION');
+				}
+				$successRedirect = empty(CASDiblock::$error);
 			}
-			unset($_REQUEST['action']);
-			if (isset($_REQUEST['action_button'])) {
-				unset($_REQUEST['action_button']);
+			if ($successRedirect) {
+				self::clearRequest();
+				LocalRedirect(self::getRedirectUrl(array('asd_ib_dest', 'asd_sect_dest', 'ID')));
 			}
-			if ($successRedirect)
-				LocalRedirect($GLOBALS['APPLICATION']->GetCurPageParam('', array('action', 'action_button', 'asd_ib_dest', 'asd_sect_dest', 'ID')));
 		}
 
-		if (isset($_REQUEST['action']) && $_REQUEST['action']=='asd_remove' && $IBLOCK_ID > 0 && isset($_REQUEST['find_section_section']) &&
-			check_bitrix_sessid() && !empty($_REQUEST['ID']) && CASDIblockRights::IsIBlockDisplay($IBLOCK_ID)
+		if ($gridAction=='asd_remove' && $IBLOCK_ID > 0 && isset($_REQUEST['find_section_section']) &&
+			!empty($_REQUEST['ID']) && CASDIblockRights::IsIBlockDisplay($IBLOCK_ID)
 		) {
 			$intSectionID = (int)$_REQUEST['find_section_section'];
 			if ($intSectionID > 0) {
+				$elementObj = new CIBlockElement();
+				$workflowMode = (CIBlock::GetArrayByID($IBLOCK_ID, 'WORKFLOW') != 'N' && Loader::includeModule('workflow'));
 				$strCurPage = $GLOBALS['APPLICATION']->GetCurPage();
 				$bElemPage = ($strCurPage=='/bitrix/admin/iblock_element_admin.php' ||
 							$strCurPage=='/bitrix/admin/cat_product_admin.php'
@@ -736,39 +894,135 @@ class CASDiblockAction {
 						}
 						if ($ID <= 0)
 							continue;
+						$iterator = CIBlockElement::GetList(
+							array(),
+							array('ID' => $ID, 'IBLOCK_ID' => $IBLOCK_ID),
+							false,
+							false,
+							array('ID', 'IBLOCK_ID', 'IBLOCK_SECTION_ID')
+						);
+						$currentElement = $iterator->Fetch();
+						if (empty($currentElement))
+							continue;
 						if (CASDIblockRights::IsElementEdit($IBLOCK_ID, $ID)) {
+							$currentElement['IBLOCK_SECTION_ID'] = (int)$currentElement['IBLOCK_SECTION_ID'];
+							$checkMainSection = ($currentElement['IBLOCK_SECTION_ID'] == $intSectionID);
+							$minSectionId = null;
 							$arSectionList = array();
 							$rsSections = CIBlockElement::GetElementGroups($ID, true);
 							while ($arSection = $rsSections->Fetch()) {
 								$arSection['ID'] = (int)$arSection['ID'];
 								if ($arSection['ID'] != $intSectionID) {
 									$arSectionList[] = $arSection['ID'];
+									if ($minSectionId === null || $minSectionId > $arSection['ID']) {
+										$minSectionId = $arSection['ID'];
+									}
 								}
 							}
-							CIBlockElement::SetElementSection($ID, $arSectionList, false);
-							if (CASDiblockVersion::checkMinVersion('15.0.1')) {
-								\Bitrix\Iblock\PropertyIndex\Manager::updateElementIndex($IBLOCK_ID, $ID);
+
+							$fields = array(
+								'IBLOCK_SECTION' => $arSectionList
+							);
+							if (CASDiblockVersion::checkMinVersion('15.5.11') && $checkMainSection) {
+								$fields['IBLOCK_SECTION_ID'] = $minSectionId;
 							}
-							$successRedirect = true;
+							$result = $elementObj->Update($ID, $fields, $workflowMode);
+							if (!$result)
+								CASDiblock::$error .= '['.$ID.'] '.$elementObj->LAST_ERROR."\n";
+							$successRedirect = empty(CASDiblock::$error);
 						}
 					}
 				}
+				unset($elementObj);
 			}
-			unset($_REQUEST['action']);
-			if (isset($_REQUEST['action_button'])) {
-				unset($_REQUEST['action_button']);
+			if ($successRedirect) {
+				self::clearRequest();
+				LocalRedirect(self::getRedirectUrl());
 			}
-			if ($successRedirect)
-				LocalRedirect($GLOBALS['APPLICATION']->GetCurPageParam('', array('action', 'action_button')));
 		}
 	}
 
 	public static function OnAfterIBlockUpdateHandler($arFields) {
 		if ($arFields['RESULT'] && CASDIblockRights::IsIBlockEdit($arFields['ID'])) {
-			global $USER_FIELD_MANAGER, $HTTP_POST_FILES;
+			global $USER_FIELD_MANAGER;
 			$PROPERTY_ID = CASDiblock::$UF_IBLOCK;
 			$USER_FIELD_MANAGER->EditFormAddFields($PROPERTY_ID, $arFields);
 			$USER_FIELD_MANAGER->Update($PROPERTY_ID, $arFields['ID'], $arFields);
 		}
+	}
+
+	private static function initAction() {
+		self::$gridAction = '';
+		self::$action = '';
+		if (CASDiblockVersion::isIblockNewGridv18()) {
+			if (isset($_REQUEST['grid_id'])) {
+				self::$gridId = $_REQUEST['grid_id'];
+				if (isset($_REQUEST['action_button_'.self::$gridId])) {
+					self::$gridAction = $_REQUEST['action_button_'.self::$gridId];
+				} else {
+					if (isset($_REQUEST['action']) && is_array($_REQUEST['action'])) {
+						if (isset($_REQUEST['action']['action_button_'.self::$gridId])) {
+							self::$gridAction = $_REQUEST['action']['action_button_'.self::$gridId];
+						}
+						if (self::$gridAction !== '') {
+							foreach ($_REQUEST['action'] as $key => $value) {
+								if ($key == 'action_button_'.self::$gridId) {
+									continue;
+								}
+								if (!isset($_REQUEST[$key])) {
+									$_REQUEST[$key] = $value;
+								}
+							}
+							unset($key, $value);
+						}
+					}
+				}
+			}
+		} else {
+			if (isset($_REQUEST['action_button']) && !isset($_REQUEST['action'])) {
+				self::$gridAction = $_REQUEST['action_button'];
+			} elseif (isset($_REQUEST['action'])) {
+				self::$gridAction = $_REQUEST['action'];
+			}
+		}
+		if (isset($_REQUEST['action_button']) && is_string($_REQUEST['action_button']) && !isset($_REQUEST['action'])) {
+			self::$action = $_REQUEST['action_button'];
+		} elseif (isset($_REQUEST['action']) && is_string($_REQUEST['action'])) {
+			self::$action = $_REQUEST['action'];
+		}
+	}
+
+	private static function getGridAction()
+	{
+		return self::$gridAction;
+	}
+
+	private static function getAction()
+	{
+		return self::$action;
+	}
+
+	private static function clearRequest() {
+		unset($_REQUEST['action']);
+		if (CASDiblockVersion::isIblockNewGridv18()) {
+			if (isset($_REQUEST['action_button_'.self::$gridId])) {
+				unset($_REQUEST['action_button_'.self::$gridId]);
+			}
+		} else {
+			if (isset($_REQUEST['action_button'])) {
+				unset($_REQUEST['action_button']);
+			}
+		}
+	}
+
+	private static function getRedirectUrl(array $keys = array())
+	{
+		$keys[] = 'action';
+		if (CASDiblockVersion::isIblockNewGridv18()) {
+			$keys[] = 'action_button_'.self::$gridId;
+		} else {
+			$keys[] = 'action_button';
+		}
+		return $GLOBALS['APPLICATION']->GetCurPageParam('', $keys);
 	}
 }

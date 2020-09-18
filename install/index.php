@@ -52,6 +52,8 @@ class asd_iblock extends CModule {
 
 		if (strlen($this->NEED_MAIN_VERSION)<=0 || version_compare(SM_VERSION, $this->NEED_MAIN_VERSION)>=0) {
 			RegisterModuleDependences('main', 'OnAdminListDisplay', 'asd.iblock', 'CASDiblockInterface', 'OnAdminListDisplayHandler');
+			RegisterModuleDependences('main', 'OnAdminContextMenuShow', 'asd.iblock', 'CASDiblockInterface', 'OnAdminContextMenuShow');
+			RegisterModuleDependences('main', 'OnAdminSubListDisplay', 'asd.iblock', 'CASDiblockInterface', 'OnAdminSubListDisplayHandler');
 			RegisterModuleDependences('main', 'OnBeforeProlog', 'asd.iblock', 'CASDiblockAction', 'OnBeforePrologHandler');
 			RegisterModuleDependences('main', 'OnAdminContextMenuShow', 'asd.iblock', 'CASDiblockInterface', 'OnAdminContextMenuShowHandler');
 			RegisterModuleDependences('main', 'OnAdminTabControlBegin', 'asd.iblock', 'CASDiblockInterface', 'OnAdminTabControlBeginHandler');
@@ -60,6 +62,7 @@ class asd_iblock extends CModule {
 			RegisterModuleDependences('iblock', 'OnIBlockPropertyBuildList', 'asd.iblock', 'CASDiblockPropCheckboxNum', 'GetUserTypeDescription');
 			RegisterModuleDependences('iblock', 'OnIBlockPropertyBuildList', 'asd.iblock', 'CASDiblockPropPalette', 'GetUserTypeDescription');
 			RegisterModuleDependences('iblock', 'OnIBlockPropertyBuildList', 'asd.iblock', 'CASDiblockPropSection', 'GetUserTypeDescription');
+			CopyDirFiles($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/asd.iblock/install/admin/', $_SERVER['DOCUMENT_ROOT'].'/bitrix/admin/', true, true);
 			CopyDirFiles($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/asd.iblock/install/js/', $_SERVER['DOCUMENT_ROOT'].'/bitrix/js/', true, true);
 			CopyDirFiles($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/asd.iblock/install/panel/', $_SERVER['DOCUMENT_ROOT'].'/bitrix/panel/', true, true);
 			CopyDirFiles($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/asd.iblock/install/tools/', $_SERVER['DOCUMENT_ROOT'].'/bitrix/tools/', true, true);
@@ -72,6 +75,8 @@ class asd_iblock extends CModule {
 
 	public function DoUninstall() {
 		UnRegisterModuleDependences('main', 'OnAdminListDisplay', 'asd.iblock', 'CASDiblockInterface', 'OnAdminListDisplayHandler');
+		UnRegisterModuleDependences('main', 'OnAdminContextMenuShow', 'asd.iblock', 'CASDiblockInterface', 'OnAdminContextMenuShow');
+		UnRegisterModuleDependences('main', 'OnAdminSubListDisplay', 'asd.iblock', 'CASDiblockInterface', 'OnAdminSubListDisplayHandler');
 		UnRegisterModuleDependences('main', 'OnBeforeProlog', 'asd.iblock', 'CASDiblockAction', 'OnBeforePrologHandler');
 		UnRegisterModuleDependences('main', 'OnAdminContextMenuShow', 'asd.iblock', 'CASDiblockInterface', 'OnAdminContextMenuShowHandler');
 		UnRegisterModuleDependences('main', 'OnAdminTabControlBegin', 'asd.iblock', 'CASDiblockInterface', 'OnAdminTabControlBeginHandler');
@@ -80,6 +85,7 @@ class asd_iblock extends CModule {
 		UnRegisterModuleDependences('iblock', 'OnIBlockPropertyBuildList', 'asd.iblock', 'CASDiblockPropCheckboxNum', 'GetUserTypeDescription');
 		UnRegisterModuleDependences('iblock', 'OnIBlockPropertyBuildList', 'asd.iblock', 'CASDiblockPropPalette', 'GetUserTypeDescription');
 		UnRegisterModuleDependences('iblock', 'OnIBlockPropertyBuildList', 'asd.iblock', 'CASDiblockPropSection', 'GetUserTypeDescription');
+		DeleteDirFiles($_SERVER['DOCUMENT_ROOT']."/bitrix/modules/asd.iblock/install/admin", $_SERVER['DOCUMENT_ROOT']."/bitrix/admin");
 		DeleteDirFilesEx('/bitrix/js/asd.iblock/');
 		DeleteDirFilesEx('/bitrix/panel/asd.iblock/');
 		DeleteDirFilesEx('/bitrix/tools/asd.iblock/');
@@ -88,6 +94,8 @@ class asd_iblock extends CModule {
 	}
 
 	private function ShowForm($type, $message, $buttonName='') {
+		global $APPLICATION;
+
 		$keys = array_keys($GLOBALS);
 		for($i=0, $intCount = count($keys); $i < $intCount; $i++) {
 			if($keys[$i]!='i' && $keys[$i]!='GLOBALS' && $keys[$i]!='strTitle' && $keys[$i]!='filepath') {
@@ -101,7 +109,7 @@ class asd_iblock extends CModule {
 
 		$APPLICATION->SetTitle(GetMessage('ASD_IBLOCK_MODULE_NAME'));
 		include($_SERVER['DOCUMENT_ROOT'].'/bitrix/modules/main/include/prolog_admin_after.php');
-		echo CAdminMessage::ShowMessage(array('MESSAGE' => $message, 'TYPE' => $type));
+		CAdminMessage::ShowMessage(array('MESSAGE' => $message, 'TYPE' => $type));
 		?>
 		<form action="<?= $APPLICATION->GetCurPage()?>" method="get">
 		<p>
